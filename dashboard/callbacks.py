@@ -257,7 +257,7 @@ def _portfolio_tab(data):
             html.Th('Stage'),
         ])),
          html.Tbody(rows)],
-        dark=True, striped=True, hover=True, responsive=True, className='mb-0',
+        striped=True, hover=True, responsive=True, className='mb-0',
     )
     return table
 
@@ -318,7 +318,7 @@ def _analysis_tab(data):
                                          html.Td(v, className='text-white fw-bold')])
                                 for k, v in info_rows
                             ])],
-                            size='sm', borderless=True, dark=True, className='mb-0',
+                            size='sm', borderless=True, className='mb-0',
                         ),
                     ], md=4),
                 ]),
@@ -360,7 +360,7 @@ def _execute_tab(data):
             html.Th('Price'), html.Th('Target'), html.Th('Stop'), html.Th(''),
         ])),
          html.Tbody(rec_rows if rec_rows else [html.Tr([html.Td('No recommendations yet.', colSpan=7)])])],
-        dark=True, striped=True, hover=True, responsive=True, size='sm',
+        striped=True, hover=True, responsive=True, size='sm',
     )
 
     # Manual trade form
@@ -455,7 +455,7 @@ def _history_tab(data):
             html.Th('Entry'), html.Th('TP'), html.Th('SL'), html.Th('Status'), html.Th('Note'),
         ])),
          html.Tbody(rows)],
-        dark=True, striped=True, hover=True, responsive=True,
+        striped=True, hover=True, responsive=True,
     )
 
 
