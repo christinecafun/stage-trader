@@ -58,22 +58,23 @@ def create_app(store, worker) -> dash.Dash:
             dbc.Modal(id='order-modal', size='lg', centered=True, children=[
                 dbc.ModalHeader(dbc.ModalTitle('Confirm Order')),
                 dbc.ModalBody([
-                    # Editable USD amount at the top of the modal
+                    # Editable USD amount — debounce=True updates on Enter or click-away
                     dbc.Row(className='mb-3 align-items-center', children=[
                         dbc.Col(width='auto', children=[
                             dbc.Label('USD Amount to invest:', className='mb-0 fw-bold'),
                         ]),
                         dbc.Col(width=3, children=[
                             dbc.Input(
-                                id='modal-usd-input', type='number', min=1, step=50,
+                                id='modal-usd-input', type='number', min=1, step=10,
                                 value=config.DEFAULT_TRADE_USD,
+                                debounce=True,
                                 style={'backgroundColor': '#2a2a3e', 'color': 'white',
                                        'border': '1px solid #444'},
                             ),
                         ]),
                         dbc.Col(width='auto', children=[
-                            dbc.Button('Recalculate', id='recalc-btn', color='secondary',
-                                       size='sm', outline=True),
+                            html.Small('Press Enter or click away to update preview',
+                                       className='text-secondary'),
                         ]),
                     ]),
                     html.Div(id='order-modal-body'),
