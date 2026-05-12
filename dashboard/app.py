@@ -57,7 +57,27 @@ def create_app(store, worker) -> dash.Dash:
             # ---- Order confirmation modal ------------------------------
             dbc.Modal(id='order-modal', size='lg', centered=True, children=[
                 dbc.ModalHeader(dbc.ModalTitle('Confirm Order')),
-                dbc.ModalBody(id='order-modal-body'),
+                dbc.ModalBody([
+                    # Editable USD amount at the top of the modal
+                    dbc.Row(className='mb-3 align-items-center', children=[
+                        dbc.Col(width='auto', children=[
+                            dbc.Label('USD Amount to invest:', className='mb-0 fw-bold'),
+                        ]),
+                        dbc.Col(width=3, children=[
+                            dbc.Input(
+                                id='modal-usd-input', type='number', min=1, step=50,
+                                value=config.DEFAULT_TRADE_USD,
+                                style={'backgroundColor': '#2a2a3e', 'color': 'white',
+                                       'border': '1px solid #444'},
+                            ),
+                        ]),
+                        dbc.Col(width='auto', children=[
+                            dbc.Button('Recalculate', id='recalc-btn', color='secondary',
+                                       size='sm', outline=True),
+                        ]),
+                    ]),
+                    html.Div(id='order-modal-body'),
+                ]),
                 dbc.ModalFooter([
                     dbc.Button('Cancel', id='cancel-btn', color='secondary', outline=True),
                     dbc.Button('Execute Order', id='execute-btn', color='success'),
