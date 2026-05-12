@@ -7,11 +7,10 @@ logger = logging.getLogger(__name__)
 _BENIGN_CODES = {2104, 2106, 2107, 2108, 2119, 2158, 10167}
 
 
-def calc_quantity(price: float, usd_amount: float, use_fractional: bool = True) -> float:
-    qty = usd_amount / price
-    if use_fractional:
-        return round(qty, 4)
-    return max(1, int(qty))
+def calc_quantity(price: float, usd_amount: float, use_fractional: bool = True) -> int:
+    # IBKR API does not support fractional share orders (error 10243).
+    # Always use whole shares regardless of the fractional flag.
+    return int(usd_amount / price)  # floor — 0 means insufficient funds
 
 
 def place_bracket_buy(

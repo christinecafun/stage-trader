@@ -134,10 +134,20 @@ def register(app, store, worker):
                 usd_amount = sizing['usd'] if sizing['usd'] > 0 else config.DEFAULT_TRADE_USD
                 sizing_reason = sizing['reason']
 
-            qty = float(qty_override) if qty_override else round(usd_amount / price, 4)
+            qty = int(qty_override) if qty_override else int(usd_amount / price)
             tp_price = round(price * (1 + tp), 2)
             sl_price = round(price * (1 - sl), 2)
             total_usd = round(qty * price, 2)
+
+            if qty < 1:
+                body = dbc.Alert([
+                    html.Strong(f"Not enough to buy 1 share. "),
+                    f"1 share of {symbol} costs ${price:,.2f}. Enter a higher USD amount.",
+                    html.Br(),
+                    html.Small("IBKR API does not support fractional share orders.",
+                               className='text-secondary'),
+                ], color='warning')
+                return True, body, no_update
 
             params = {
                 'action': 'BUY',
@@ -146,7 +156,7 @@ def register(app, store, worker):
                 'limit_price': price,
                 'profit_target_pct': tp,
                 'stop_loss_pct': sl,
-                'use_fractional': config.USE_FRACTIONAL,
+                'use_fractional': False,
             }
 
             body = _order_preview_body(
@@ -197,9 +207,15 @@ def register(app, store, worker):
         price = pending['limit_price']
         tp    = pending['profit_target_pct']
         sl    = pending['stop_loss_pct']
-        qty      = round(usd / price, 4)
+        qty      = int(usd / price)
         tp_price = round(price * (1 + tp), 2)
         sl_price = round(price * (1 - sl), 2)
+
+        if qty < 1:
+            return dbc.Alert([
+                html.Strong("Not enough for 1 share. "),
+                f"1 share of {pending['symbol']} costs ${price:,.2f}. Enter ${price:,.0f}+ to place this order.",
+            ], color='warning')
 
         sd = store.get_snapshot()['stage_data'].get(pending['symbol'], {})
         return _order_preview_body(
@@ -295,9 +311,21 @@ def register(app, store, worker):
             )
             usd = sizing['usd'] if sizing['usd'] > 0 else config.DEFAULT_TRADE_USD
 
-            qty = round(usd / price, 4)
+            qty = int(usd / price)  # whole shares only — IBKR API restriction
             tp_price = round(price * (1 + tp), 2)
             sl_price = round(price * (1 - sl), 2)
+
+            if qty < 1:
+                body = dbc.Alert([
+                    html.Strong(f"Not enough cash to buy 1 share of {symbol}. "),
+                    html.Br(),
+                    f"1 share costs ${price:,.2f}. You have ${usd:,.2f} available.",
+                    html.Br(),
+                    html.Small("Note: IBKR does not allow fractional share orders via the API.",
+                               className='text-secondary'),
+                ], color='warning')
+                return True, body, None, usd
+
             params = {
                 'action': 'BUY',
                 'symbol': symbol,
@@ -305,7 +333,7 @@ def register(app, store, worker):
                 'limit_price': price,
                 'profit_target_pct': tp,
                 'stop_loss_pct': sl,
-                'use_fractional': config.USE_FRACTIONAL,
+                'use_fractional': False,
             }
             body = _order_preview_body(
                 action='BUY', symbol=symbol, qty=qty, price=price,
