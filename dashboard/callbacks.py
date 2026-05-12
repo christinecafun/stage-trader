@@ -9,7 +9,7 @@ import dash
 from dash import Input, Output, State, callback_context, html, dcc, no_update
 
 import config
-from analysis.stages import STAGE_COLORS, STAGE_LABELS
+from analysis.stages import STAGE_COLORS, STAGE_LABELS, recommend_position_size
 
 
 def register(app, store, worker):
@@ -117,11 +117,23 @@ def register(app, store, worker):
             return True, dbc.Alert('Could not determine current price. Is TWS connected?',
                                    color='warning'), no_update
 
-        usd_amount = float(usd_str or config.DEFAULT_TRADE_USD)
         tp = float(tp_pct or config.PROFIT_TARGET_PCT * 100) / 100
         sl = float(sl_pct or config.STOP_LOSS_PCT * 100) / 100
 
         if action == 'BUY':
+            # Use risk-based sizing unless user typed an explicit amount
+            account_value, settled_cash = _account_figures(data['account'])
+            if usd_str:
+                usd_amount = float(usd_str)
+                sizing_reason = None
+            else:
+                sizing = recommend_position_size(
+                    entry=price, stop=sd.get('stop'),
+                    account_value=account_value, settled_cash=settled_cash,
+                )
+                usd_amount = sizing['usd'] if sizing['usd'] > 0 else config.DEFAULT_TRADE_USD
+                sizing_reason = sizing['reason']
+
             qty = float(qty_override) if qty_override else round(usd_amount / price, 4)
             tp_price = round(price * (1 + tp), 2)
             sl_price = round(price * (1 - sl), 2)
@@ -142,6 +154,7 @@ def register(app, store, worker):
                 tp=tp_price, sl=sl_price, usd=total_usd,
                 tp_pct=tp * 100, sl_pct=sl * 100,
                 stage_label=sd.get('label', ''),
+                sizing_reason=sizing_reason,
             )
 
         else:  # SELL
@@ -157,6 +170,7 @@ def register(app, store, worker):
                 tp=None, sl=None, usd=round(qty * price, 2),
                 tp_pct=None, sl_pct=None,
                 stage_label=sd.get('label', ''),
+                sizing_reason=None,
             )
 
         return True, body, params
@@ -239,23 +253,24 @@ def register(app, store, worker):
         return False, msg, True, 'success'
 
     # ==================================================================
-    # Recommendation row buttons → open modal directly
+    # Recommendation row buttons → open modal with sized position
     # ==================================================================
     @app.callback(
         Output('order-modal', 'is_open', allow_duplicate=True),
         Output('order-modal-body', 'children', allow_duplicate=True),
         Output('pending-order', 'data', allow_duplicate=True),
+        Output('modal-usd-input', 'value'),
         Input({'type': 'rec-btn', 'index': dash.ALL}, 'n_clicks'),
         prevent_initial_call=True,
     )
     def rec_button_clicked(clicks):
         ctx = callback_context
         if not ctx.triggered or not any(c for c in clicks if c):
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         tid = ctx.triggered_id
         if not tid:
-            return no_update, no_update, no_update
+            return no_update, no_update, no_update, no_update
 
         parts = tid['index'].split('|')
         symbol = parts[0]
@@ -267,12 +282,22 @@ def register(app, store, worker):
         price = sd.get('price') or (pos_match['current_price'] if pos_match else None)
 
         if not price:
-            return True, dbc.Alert('Could not get current price.', color='warning'), no_update
+            return True, dbc.Alert('Could not get current price.', color='warning'), no_update, no_update
 
         if action == 'BUY':
-            usd = config.DEFAULT_TRADE_USD
             tp = config.PROFIT_TARGET_PCT
             sl = config.STOP_LOSS_PCT
+
+            # Size position using 2% risk rule against settled cash
+            account_value, settled_cash = _account_figures(data['account'])
+            sizing = recommend_position_size(
+                entry=price,
+                stop=sd.get('stop'),
+                account_value=account_value,
+                settled_cash=settled_cash,
+            )
+            usd = sizing['usd'] if sizing['usd'] > 0 else config.DEFAULT_TRADE_USD
+
             qty = round(usd / price, 4)
             tp_price = round(price * (1 + tp), 2)
             sl_price = round(price * (1 - sl), 2)
@@ -290,18 +315,21 @@ def register(app, store, worker):
                 tp=tp_price, sl=sl_price, usd=round(qty * price, 2),
                 tp_pct=tp * 100, sl_pct=sl * 100,
                 stage_label=sd.get('label', ''),
+                sizing_reason=sizing['reason'],
             )
         else:
             qty = abs(pos_match['position']) if pos_match else 0
+            usd = round(qty * price, 2)
             params = {'action': 'SELL', 'symbol': symbol, 'quantity': qty}
             body = _order_preview_body(
                 action='SELL', symbol=symbol, qty=qty, price=price,
-                tp=None, sl=None, usd=round(qty * price, 2),
+                tp=None, sl=None, usd=usd,
                 tp_pct=None, sl_pct=None,
                 stage_label=sd.get('label', ''),
+                sizing_reason=None,
             )
 
-        return True, body, params
+        return True, body, params, usd
 
 
 # ===========================================================================
@@ -624,6 +652,20 @@ def _chart_layout(symbol, empty=False):
 # Helpers
 # ===========================================================================
 
+def _account_figures(acc: dict) -> tuple[float, float]:
+    """Return (account_value, settled_cash) from account summary dict."""
+    try:
+        account_value = float(acc.get('NetLiquidation', 0))
+    except Exception:
+        account_value = 0.0
+    try:
+        # SettledCash is the safest to use for new buys (no unsettled funds)
+        settled_cash = float(acc.get('SettledCash') or acc.get('TotalCashValue') or 0)
+    except Exception:
+        settled_cash = 0.0
+    return account_value, max(settled_cash, 0.0)
+
+
 def _fmt_usd(val):
     try:
         return f"${float(val):,.2f}"
@@ -641,15 +683,16 @@ def _fmt_usd_signed(val):
         return '—'
 
 
-def _order_preview_body(action, symbol, qty, price, tp, sl, usd, tp_pct, sl_pct, stage_label):
+def _order_preview_body(action, symbol, qty, price, tp, sl, usd,
+                        tp_pct, sl_pct, stage_label, sizing_reason=None):
     action_color = 'success' if action == 'BUY' else 'danger'
     rows = [
-        ('Symbol', symbol),
+        ('Symbol', html.Strong(symbol)),
         ('Action', html.Span(action, className=f'badge bg-{action_color}')),
         ('Stage', stage_label or '—'),
         ('Quantity (shares)', f'{qty:,.4f}'),
         ('Limit Price', f'${price:.2f}'),
-        ('USD Value', f'${usd:,.2f}'),
+        ('USD Value', html.Strong(f'${usd:,.2f}')),
     ]
     if action == 'BUY':
         rows += [
@@ -665,8 +708,20 @@ def _order_preview_body(action, symbol, qty, price, tp, sl, usd, tp_pct, sl_pct,
         borderless=True, size='sm',
     )
 
-    warning = dbc.Alert(
-        '⚠  This will send a LIVE order to IBKR TWS. Please review carefully.',
-        color='warning', className='mb-0 mt-3 py-2',
+    parts = [table]
+
+    if sizing_reason:
+        parts.append(
+            dbc.Alert(
+                [html.I(className='me-1'), f'Position sized by: {sizing_reason}'],
+                color='info', className='py-2 mb-2', style={'fontSize': '0.85rem'},
+            )
+        )
+
+    parts.append(
+        dbc.Alert(
+            '⚠  This will send a LIVE order to IBKR TWS. Please review carefully.',
+            color='warning', className='mb-0 py-2',
+        )
     )
-    return html.Div([table, warning])
+    return html.Div(parts)

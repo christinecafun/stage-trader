@@ -2,6 +2,66 @@ import pandas as pd
 import numpy as np
 from config import PROFIT_TARGET_PCT, STOP_LOSS_PCT
 
+RISK_PCT = 0.02          # risk 2% of account per trade
+MAX_POSITION_PCT = 0.20  # never put more than 20% of account in one position
+
+
+def recommend_position_size(
+    entry: float,
+    stop: float | None,
+    account_value: float,
+    settled_cash: float,
+) -> dict:
+    """
+    Fixed-fractional position sizing using the 2% risk rule.
+
+    Returns a dict with recommended USD amount and a plain-English reason.
+    """
+    available = min(settled_cash, account_value * MAX_POSITION_PCT)
+    available = max(available, 0)
+
+    if not entry or entry <= 0:
+        return {'usd': 0, 'qty': 0, 'reason': 'No price available.'}
+
+    risk_dollars = account_value * RISK_PCT
+
+    if stop and stop > 0 and stop < entry:
+        stop_distance = entry - stop
+        stop_pct = (stop_distance / entry) * 100
+        ideal_qty = risk_dollars / stop_distance
+        ideal_usd = ideal_qty * entry
+    else:
+        # No stop available — fall back to 5% assumed stop distance
+        stop_pct = STOP_LOSS_PCT * 100
+        stop_distance = entry * STOP_LOSS_PCT
+        ideal_qty = risk_dollars / stop_distance
+        ideal_usd = ideal_qty * entry
+
+    # Apply caps
+    usd = round(min(ideal_usd, available), 2)
+    qty = round(usd / entry, 4)
+
+    cap_note = ''
+    if usd < ideal_usd:
+        if settled_cash < account_value * MAX_POSITION_PCT:
+            cap_note = ' — limited by settled cash'
+        else:
+            cap_note = f' — capped at {MAX_POSITION_PCT*100:.0f}% max position'
+
+    reason = (
+        f"2% risk rule: risking ${risk_dollars:.2f} "
+        f"({RISK_PCT*100:.0f}% of ${account_value:,.2f}) "
+        f"with stop {stop_pct:.1f}% below entry{cap_note}"
+    )
+
+    return {
+        'usd': usd,
+        'qty': qty,
+        'risk_dollars': round(risk_dollars, 2),
+        'stop_pct': round(stop_pct, 1),
+        'reason': reason,
+    }
+
 
 STAGE_LABELS = {
     0: 'Unknown',
