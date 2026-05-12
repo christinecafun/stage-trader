@@ -1,7 +1,10 @@
 import logging
-from ib_insync import Stock, Order
+from ib_insync import Stock, Order, LimitOrder, StopOrder
 
 logger = logging.getLogger(__name__)
+
+# IBKR error codes that are informational only (not real failures)
+_BENIGN_CODES = {2104, 2106, 2107, 2108, 2119, 2158, 10167}
 
 
 def calc_quantity(price: float, usd_amount: float, use_fractional: bool = True) -> float:
@@ -22,11 +25,6 @@ def place_bracket_buy(
     exchange: str = 'SMART',
     currency: str = 'USD',
 ) -> dict:
-    """
-    Place a bracket BUY with an attached take-profit limit and stop-loss.
-    Uses fractional share quantities when enabled.
-    Returns a summary dict.
-    """
     contract = Stock(symbol, exchange, currency)
     ib.qualifyContracts(contract)
 
@@ -37,46 +35,47 @@ def place_bracket_buy(
     tp_price = round(limit_price * (1 + profit_target_pct), 2)
     sl_price = round(limit_price * (1 - stop_loss_pct), 2)
 
-    # Build parent + attached orders manually so we can support fractional qty
-    next_id = ib.client.getReqId()
+    # Capture IBKR error events during placement
+    errors = []
+    def _on_error(reqId, errorCode, errorString, contract, advancedOrderRejectJson=''):
+        if errorCode not in _BENIGN_CODES:
+            errors.append(f"[{errorCode}] {errorString}")
+    ib.errorEvent += _on_error
 
-    parent = Order()
-    parent.orderId = next_id
-    parent.action = 'BUY'
-    parent.orderType = 'LMT'
-    parent.totalQuantity = qty
-    parent.lmtPrice = limit_price
-    parent.transmit = False
-    parent.tif = 'DAY'
+    try:
+        # Use ib_insync's bracketOrder — calls getReqId() correctly for each leg
+        bracket = ib.bracketOrder(
+            'BUY', qty,
+            limitPrice=limit_price,
+            takeProfitPrice=tp_price,
+            stopLossPrice=sl_price,
+        )
+        # Override TIF on each leg
+        bracket.parent.tif = 'DAY'
+        bracket.takeProfit.tif = 'GTC'
+        bracket.stopLoss.tif = 'GTC'
 
-    take_profit = Order()
-    take_profit.orderId = next_id + 1
-    take_profit.parentId = next_id
-    take_profit.action = 'SELL'
-    take_profit.orderType = 'LMT'
-    take_profit.totalQuantity = qty
-    take_profit.lmtPrice = tp_price
-    take_profit.transmit = False
-    take_profit.tif = 'GTC'
+        trades = []
+        for order in bracket:
+            trade = ib.placeOrder(contract, order)
+            trades.append(trade)
 
-    stop_loss = Order()
-    stop_loss.orderId = next_id + 2
-    stop_loss.parentId = next_id
-    stop_loss.action = 'SELL'
-    stop_loss.orderType = 'STP'
-    stop_loss.totalQuantity = qty
-    stop_loss.auxPrice = sl_price
-    stop_loss.transmit = True  # transmits all three at once
-    stop_loss.tif = 'GTC'
+        # Wait up to 3 seconds for IBKR to acknowledge or reject
+        ib.sleep(3)
 
-    trades = []
-    for order in (parent, take_profit, stop_loss):
-        trade = ib.placeOrder(contract, order)
-        trades.append(trade)
+    finally:
+        ib.errorEvent -= _on_error
 
-    logger.info(
-        f"Bracket BUY {symbol}: qty={qty} entry=${limit_price} TP=${tp_price} SL=${sl_price}"
-    )
+    if errors:
+        raise RuntimeError(f"IBKR rejected order: {'; '.join(errors)}")
+
+    # Check order status of the parent trade
+    parent_trade = trades[0]
+    status = parent_trade.orderStatus.status
+    if status in ('Inactive', 'ApiCancelled', 'Cancelled'):
+        raise RuntimeError(f"Order {status} — check TWS for details")
+
+    logger.info(f"Bracket BUY {symbol}: qty={qty} @ ${limit_price} TP=${tp_price} SL=${sl_price} status={status}")
 
     return {
         'symbol': symbol,
@@ -86,7 +85,7 @@ def place_bracket_buy(
         'take_profit': tp_price,
         'stop_loss': sl_price,
         'usd_value': round(qty * limit_price, 2),
-        'order_ids': [next_id, next_id + 1, next_id + 2],
+        'ibkr_status': status,
     }
 
 
@@ -97,30 +96,42 @@ def place_sell_market(
     exchange: str = 'SMART',
     currency: str = 'USD',
 ) -> dict:
-    """Place a market SELL to close / reduce a position."""
     contract = Stock(symbol, exchange, currency)
     ib.qualifyContracts(contract)
 
-    order = Order()
-    order.action = 'SELL'
-    order.orderType = 'MKT'
-    order.totalQuantity = abs(quantity)
-    order.transmit = True
-    order.tif = 'DAY'
+    errors = []
+    def _on_error(reqId, errorCode, errorString, contract, advancedOrderRejectJson=''):
+        if errorCode not in _BENIGN_CODES:
+            errors.append(f"[{errorCode}] {errorString}")
+    ib.errorEvent += _on_error
 
-    trade = ib.placeOrder(contract, order)
-    logger.info(f"Market SELL {symbol}: qty={quantity}")
+    try:
+        order = Order()
+        order.action = 'SELL'
+        order.orderType = 'MKT'
+        order.totalQuantity = abs(quantity)
+        order.transmit = True
+        order.tif = 'DAY'
+        trade = ib.placeOrder(contract, order)
+        ib.sleep(2)
+    finally:
+        ib.errorEvent -= _on_error
+
+    if errors:
+        raise RuntimeError(f"IBKR rejected sell: {'; '.join(errors)}")
+
+    logger.info(f"Market SELL {symbol}: qty={quantity} status={trade.orderStatus.status}")
 
     return {
         'symbol': symbol,
         'action': 'SELL',
         'quantity': abs(quantity),
-        'order_type': 'MKT',
+        'entry': trade.orderStatus.avgFillPrice or 0,
+        'ibkr_status': trade.orderStatus.status,
     }
 
 
 def get_live_price(ib, contract) -> float | None:
-    """Fetch a live mid-price snapshot. Returns None on failure."""
     try:
         ticker = ib.reqMktData(contract, '', False, False)
         ib.sleep(2)

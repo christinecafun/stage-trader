@@ -549,7 +549,21 @@ def _history_tab(data):
 
     rows = []
     for o in orders:
-        status_color = 'success' if o.get('status') == 'ok' else 'danger'
+        our_status = o.get('status', '—')
+        ibkr_status = o.get('ibkr_status', '')
+        error = o.get('error', '')
+
+        if our_status == 'error':
+            badge = html.Span('FAILED', className='badge bg-danger')
+        elif ibkr_status in ('Submitted', 'PreSubmitted', 'Filled'):
+            badge = html.Span(ibkr_status.upper(), className='badge bg-success')
+        elif ibkr_status in ('Inactive', 'ApiCancelled', 'Cancelled'):
+            badge = html.Span(ibkr_status.upper(), className='badge bg-danger')
+        else:
+            badge = html.Span(ibkr_status.upper() or 'SENT', className='badge bg-secondary')
+
+        note = error or ''
+
         rows.append(html.Tr([
             html.Td(o.get('ts', '—')),
             html.Td(o.get('symbol', '—')),
@@ -558,8 +572,8 @@ def _history_tab(data):
             html.Td(f"${o['entry']:.2f}" if o.get('entry') else '—'),
             html.Td(f"${o['take_profit']:.2f}" if o.get('take_profit') else '—'),
             html.Td(f"${o['stop_loss']:.2f}" if o.get('stop_loss') else '—'),
-            html.Td(html.Span(o.get('status', '—').upper(), className=f'badge bg-{status_color}')),
-            html.Td(o.get('error', ''), className='text-danger', style={'fontSize': '0.8rem'}),
+            html.Td(badge),
+            html.Td(note, className='text-danger', style={'fontSize': '0.8rem'}),
         ]))
 
     return dbc.Table(
