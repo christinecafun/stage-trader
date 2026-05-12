@@ -676,43 +676,74 @@ def _fmt_usd_signed(val):
 
 def _order_preview_body(action, symbol, qty, price, tp, sl, usd,
                         tp_pct, sl_pct, stage_label, sizing_reason=None):
-    action_color = 'success' if action == 'BUY' else 'danger'
-    rows = [
-        ('Symbol', html.Strong(symbol)),
-        ('Action', html.Span(action, className=f'badge bg-{action_color}')),
-        ('Stage', stage_label or '—'),
-        ('Quantity (shares)', f'{qty:,.4f}'),
-        ('Limit Price', f'${price:.2f}'),
-        ('USD Value', html.Strong(f'${usd:,.2f}')),
-    ]
     if action == 'BUY':
-        rows += [
-            ('Take Profit', html.Span(f'${tp:.2f}  (+{tp_pct:.0f}%)', style={'color': '#28a745'})),
-            ('Stop Loss', html.Span(f'${sl:.2f}  (−{sl_pct:.0f}%)', style={'color': '#dc3545'})),
-        ]
+        profit = round(usd * (tp_pct / 100), 2)
+        loss   = round(usd * (sl_pct / 100), 2)
 
-    table = dbc.Table(
-        [html.Tbody([
-            html.Tr([html.Td(k, className='text-secondary pe-3'), html.Td(v)])
-            for k, v in rows
-        ])],
-        borderless=True, size='sm',
-    )
+        body = html.Div([
+            # What you're buying
+            dbc.Row(className='mb-3', children=[
+                dbc.Col([
+                    html.Div(html.Strong(symbol, style={'fontSize': '1.6rem', 'color': 'white'})),
+                    html.Div(html.Span(stage_label, className='badge',
+                                       style={'backgroundColor': '#28a745', 'fontSize': '0.9rem'})),
+                ]),
+            ]),
 
-    parts = [table]
+            html.Hr(style={'borderColor': '#444'}),
 
-    if sizing_reason:
-        parts.append(
+            # The three numbers that matter
+            dbc.Row(className='text-center my-3 g-2', children=[
+                dbc.Col(dbc.Card(style={'backgroundColor': '#1a1a2e', 'border': '1px solid #444'}, children=dbc.CardBody([
+                    html.Div('You spend', className='text-secondary', style={'fontSize': '0.8rem'}),
+                    html.Div(f'${usd:,.2f}', style={'fontSize': '1.5rem', 'fontWeight': 'bold', 'color': 'white'}),
+                    html.Div(f'{qty:,.4f} shares @ ${price:.2f}', className='text-secondary', style={'fontSize': '0.75rem'}),
+                ]))),
+                dbc.Col(dbc.Card(style={'backgroundColor': '#0d2b0d', 'border': '1px solid #28a745'}, children=dbc.CardBody([
+                    html.Div('Best case profit', className='text-secondary', style={'fontSize': '0.8rem'}),
+                    html.Div(f'+${profit:,.2f}', style={'fontSize': '1.5rem', 'fontWeight': 'bold', 'color': '#28a745'}),
+                    html.Div(f'Auto-sells at ${tp:.2f} (+{tp_pct:.0f}%)', className='text-secondary', style={'fontSize': '0.75rem'}),
+                ]))),
+                dbc.Col(dbc.Card(style={'backgroundColor': '#2b0d0d', 'border': '1px solid #dc3545'}, children=dbc.CardBody([
+                    html.Div('Worst case loss', className='text-secondary', style={'fontSize': '0.8rem'}),
+                    html.Div(f'-${loss:,.2f}', style={'fontSize': '1.5rem', 'fontWeight': 'bold', 'color': '#dc3545'}),
+                    html.Div(f'Auto-sells at ${sl:.2f} (-{sl_pct:.0f}%)', className='text-secondary', style={'fontSize': '0.75rem'}),
+                ]))),
+            ]),
+
+            html.Hr(style={'borderColor': '#444'}),
+
+            # Sizing reason
+            html.Div(
+                html.Small(f'Sizing: {sizing_reason}', className='text-secondary'),
+                className='mb-2',
+            ) if sizing_reason else html.Div(),
+
             dbc.Alert(
-                [html.I(className='me-1'), f'Position sized by: {sizing_reason}'],
-                color='info', className='py-2 mb-2', style={'fontSize': '0.85rem'},
-            )
-        )
+                '⚠  This sends a LIVE order to IBKR TWS.',
+                color='warning', className='mb-0 py-2 text-center',
+            ),
+        ])
 
-    parts.append(
-        dbc.Alert(
-            '⚠  This will send a LIVE order to IBKR TWS. Please review carefully.',
-            color='warning', className='mb-0 py-2',
-        )
-    )
-    return html.Div(parts)
+    else:  # SELL
+        body = html.Div([
+            dbc.Row(className='mb-3', children=[
+                dbc.Col([
+                    html.Div(html.Strong(symbol, style={'fontSize': '1.6rem', 'color': 'white'})),
+                    html.Div(html.Span(stage_label or 'Sell', className='badge bg-danger',
+                                       style={'fontSize': '0.9rem'})),
+                ]),
+            ]),
+            html.Hr(style={'borderColor': '#444'}),
+            dbc.Row(className='text-center my-3', children=[
+                dbc.Col(dbc.Card(style={'backgroundColor': '#1a1a2e', 'border': '1px solid #dc3545'}, children=dbc.CardBody([
+                    html.Div('You sell', className='text-secondary', style={'fontSize': '0.8rem'}),
+                    html.Div(f'${usd:,.2f}', style={'fontSize': '1.5rem', 'fontWeight': 'bold', 'color': 'white'}),
+                    html.Div(f'{qty:,.4f} shares at market price', className='text-secondary', style={'fontSize': '0.75rem'}),
+                ]))),
+            ]),
+            html.Hr(style={'borderColor': '#444'}),
+            dbc.Alert('⚠  This sends a LIVE order to IBKR TWS.', color='warning', className='mb-0 py-2 text-center'),
+        ])
+
+    return body
