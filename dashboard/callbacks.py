@@ -176,42 +176,38 @@ def register(app, store, worker):
         return True, body, params
 
     # ==================================================================
-    # Recalculate modal preview when USD amount changes (debounced input)
+    # Live preview update as user types USD amount
     # ==================================================================
     @app.callback(
         Output('order-modal-body', 'children', allow_duplicate=True),
-        Output('pending-order', 'data', allow_duplicate=True),
         Input('modal-usd-input', 'value'),
         State('pending-order', 'data'),
         prevent_initial_call=True,
     )
     def recalculate_order(usd_val, pending):
-        if not pending or not usd_val or float(usd_val) <= 0:
-            return no_update, no_update
+        if not pending or not usd_val:
+            return no_update
+        try:
+            usd = float(usd_val)
+        except (TypeError, ValueError):
+            return no_update
+        if usd <= 0 or pending.get('action') != 'BUY':
+            return no_update
 
-        usd = float(usd_val)
         price = pending['limit_price']
-        action = pending['action']
-
-        if action != 'BUY':
-            return no_update, no_update
-
-        tp = pending['profit_target_pct']
-        sl = pending['stop_loss_pct']
-        qty = round(usd / price, 4)
+        tp    = pending['profit_target_pct']
+        sl    = pending['stop_loss_pct']
+        qty      = round(usd / price, 4)
         tp_price = round(price * (1 + tp), 2)
         sl_price = round(price * (1 - sl), 2)
 
-        updated = {**pending, 'usd_amount': round(qty * price, 2)}
-
         sd = store.get_snapshot()['stage_data'].get(pending['symbol'], {})
-        body = _order_preview_body(
+        return _order_preview_body(
             action='BUY', symbol=pending['symbol'], qty=qty, price=price,
             tp=tp_price, sl=sl_price, usd=round(qty * price, 2),
             tp_pct=tp * 100, sl_pct=sl * 100,
             stage_label=sd.get('label', ''),
         )
-        return body, updated
 
     # ==================================================================
     # Execute confirmed order
@@ -224,20 +220,30 @@ def register(app, store, worker):
         Input('execute-btn', 'n_clicks'),
         Input('cancel-btn', 'n_clicks'),
         State('pending-order', 'data'),
+        State('modal-usd-input', 'value'),
         prevent_initial_call=True,
     )
-    def execute_or_cancel(exec_clicks, cancel_clicks, pending):
+    def execute_or_cancel(exec_clicks, cancel_clicks, pending, modal_usd):
         ctx = callback_context
         if not ctx.triggered:
             return no_update, no_update, no_update, no_update
 
-        trigger = ctx.triggered[0]['prop_id']
-
-        if 'cancel-btn' in trigger:
+        if 'cancel-btn' in ctx.triggered[0]['prop_id']:
             return False, no_update, no_update, no_update
 
         if not pending:
             return False, 'No order pending.', True, 'warning'
+
+        # Always use the current USD input — what you see is what gets sent
+        if pending.get('action') == 'BUY' and modal_usd:
+            try:
+                usd = float(modal_usd)
+                if usd > 0:
+                    price = pending['limit_price']
+                    qty   = round(usd / price, 4)
+                    pending = {**pending, 'usd_amount': round(qty * price, 2)}
+            except (TypeError, ValueError):
+                pass
 
         order_id = worker.request_order(pending)
         msg = f"Order submitted (id: {order_id}). Check Order History tab for status."

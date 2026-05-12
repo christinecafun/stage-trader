@@ -67,13 +67,12 @@ def create_app(store, worker) -> dash.Dash:
                             dbc.Input(
                                 id='modal-usd-input', type='number', min=1, step=10,
                                 value=config.DEFAULT_TRADE_USD,
-                                debounce=True,
                                 style={'backgroundColor': '#2a2a3e', 'color': 'white',
                                        'border': '1px solid #444'},
                             ),
                         ]),
                         dbc.Col(width='auto', children=[
-                            html.Small('Press Enter or click away to update preview',
+                            html.Small('Preview updates as you type',
                                        className='text-secondary'),
                         ]),
                     ]),
