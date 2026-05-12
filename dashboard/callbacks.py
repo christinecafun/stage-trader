@@ -195,25 +195,69 @@ def register(app, store, worker):
         return False, msg, True, 'success'
 
     # ==================================================================
-    # Quick-sell from recommendations row
+    # Recommendation row buttons → open modal directly
     # ==================================================================
     @app.callback(
-        Output('ex-symbol', 'value'),
-        Output('ex-action', 'value'),
-        Output('tabs', 'active_tab'),
-        Input({'type': 'quick-action', 'index': dash.ALL}, 'n_clicks'),
-        State({'type': 'quick-action', 'index': dash.ALL}, 'id'),
+        Output('order-modal', 'is_open', allow_duplicate=True),
+        Output('order-modal-body', 'children', allow_duplicate=True),
+        Output('pending-order', 'data', allow_duplicate=True),
+        Input({'type': 'rec-btn', 'index': dash.ALL}, 'n_clicks'),
         prevent_initial_call=True,
     )
-    def quick_action(clicks, ids):
+    def rec_button_clicked(clicks):
         ctx = callback_context
-        if not ctx.triggered or not any(clicks):
+        if not ctx.triggered or not any(c for c in clicks if c):
             return no_update, no_update, no_update
-        triggered_id = json.loads(ctx.triggered[0]['prop_id'].split('.')[0])
-        parts = triggered_id['index'].split('|')
+
+        tid = ctx.triggered_id
+        if not tid:
+            return no_update, no_update, no_update
+
+        parts = tid['index'].split('|')
         symbol = parts[0]
         action = parts[1] if len(parts) > 1 else 'BUY'
-        return symbol, action, 'execute'
+
+        data = store.get_snapshot()
+        pos_match = next((p for p in data['positions'] if p['symbol'] == symbol), None)
+        sd = data['stage_data'].get(symbol, {})
+        price = sd.get('price') or (pos_match['current_price'] if pos_match else None)
+
+        if not price:
+            return True, dbc.Alert('Could not get current price.', color='warning'), no_update
+
+        if action == 'BUY':
+            usd = config.DEFAULT_TRADE_USD
+            tp = config.PROFIT_TARGET_PCT
+            sl = config.STOP_LOSS_PCT
+            qty = round(usd / price, 4)
+            tp_price = round(price * (1 + tp), 2)
+            sl_price = round(price * (1 - sl), 2)
+            params = {
+                'action': 'BUY',
+                'symbol': symbol,
+                'usd_amount': round(qty * price, 2),
+                'limit_price': price,
+                'profit_target_pct': tp,
+                'stop_loss_pct': sl,
+                'use_fractional': config.USE_FRACTIONAL,
+            }
+            body = _order_preview_body(
+                action='BUY', symbol=symbol, qty=qty, price=price,
+                tp=tp_price, sl=sl_price, usd=round(qty * price, 2),
+                tp_pct=tp * 100, sl_pct=sl * 100,
+                stage_label=sd.get('label', ''),
+            )
+        else:
+            qty = abs(pos_match['position']) if pos_match else 0
+            params = {'action': 'SELL', 'symbol': symbol, 'quantity': qty}
+            body = _order_preview_body(
+                action='SELL', symbol=symbol, qty=qty, price=price,
+                tp=None, sl=None, usd=round(qty * price, 2),
+                tp_pct=None, sl_pct=None,
+                stage_label=sd.get('label', ''),
+            )
+
+        return True, body, params
 
 
 # ===========================================================================
@@ -348,8 +392,8 @@ def _execute_tab(data):
             html.Td(f"${r['target']:.2f}" if r.get('target') else '—'),
             html.Td(f"${r['stop']:.2f}" if r.get('stop') else '—'),
             html.Td(
-                dbc.Button(action, size='sm', color=btn_color, outline=True,
-                           id={'type': 'quick-action',
+                dbc.Button(action, size='sm', color=btn_color,
+                           id={'type': 'rec-btn',
                                'index': f"{r['symbol']}|{'SELL' if 'SELL' in action or 'REDUCE' in action else 'BUY'}"}),
             ),
         ]))
