@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' http://127.0.0.1:5050; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self';" />
+  <title>Weinstein Trader</title>
+  <!-- Use system fonts — no external network required -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Title bar drag area -->
+  <div class="titlebar">
+    <span class="titlebar-title">⬡ Weinstein Trader</span>
+    <div class="titlebar-controls">
+      <span id="conn-dot" class="conn-dot disconnected" title="TWS Connection"></span>
+      <span id="conn-label" class="conn-label">Disconnected</span>
+    </div>
+  </div>
+
+  <!-- Header stats -->
+  <div class="header-stats">
+    <div class="stat-card">
+      <div class="stat-value" id="stat-netliq">—</div>
+      <div class="stat-label">Net Liquidation</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-cash">—</div>
+      <div class="stat-label">Settled Cash</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-pnl">—</div>
+      <div class="stat-label">Unrealised P&amp;L</div>
+    </div>
+    <div class="stat-card milestone-card">
+      <div class="milestone-row">
+        <span class="stat-label">Milestone Progress</span>
+        <span class="stat-value small" id="milestone-label">—</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="milestone-bar" style="width:0%"></div>
+      </div>
+    </div>
+    <button class="refresh-btn" id="refresh-btn" onclick="refreshPortfolio()">⟳ Refresh</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="portfolio" onclick="switchTab('portfolio')">Portfolio</button>
+    <button class="tab" data-tab="wishlist" onclick="switchTab('wishlist')">Wishlist</button>
+    <button class="tab" data-tab="nextmove" onclick="switchTab('nextmove')">Next Move</button>
+    <button class="tab" data-tab="chat" onclick="switchTab('chat')">Chat</button>
+  </div>
+
+  <!-- Tab content -->
+  <div class="tab-content">
+
+    <!-- PORTFOLIO -->
+    <div id="tab-portfolio" class="tab-pane active">
+      <div class="portfolio-layout">
+        <div class="positions-panel">
+          <div class="panel-header">
+            <h2>Live Positions</h2>
+            <span class="panel-subtitle" id="positions-updated">Not loaded</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="positions-table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th class="num">Qty</th>
+                  <th class="num">Avg Cost</th>
+                  <th class="num">Price</th>
+                  <th class="num">Mkt Value</th>
+                  <th class="num">Unreal P&amp;L</th>
+                  <th class="num">%</th>
+                  <th>Frac</th>
+                </tr>
+              </thead>
+              <tbody id="positions-body">
+                <tr><td colspan="8" class="empty-row">Loading positions…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="ai-panel">
+          <div class="panel-header">
+            <h2>AI Analysis</h2>
+            <button class="gold-btn" id="analyse-portfolio-btn" onclick="analysePortfolio()">
+              ✦ Analyse All Positions
+            </button>
+          </div>
+          <div class="ai-output" id="portfolio-ai-output">
+            <p class="placeholder-text">Click "Analyse All Positions" to get Claude's Weinstein Stage analysis, news summary, and recommendations for your entire portfolio.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WISHLIST -->
+    <div id="tab-wishlist" class="tab-pane">
+      <div class="portfolio-layout">
+        <div class="positions-panel">
+          <div class="panel-header">
+            <h2>Watchlist</h2>
+            <div class="add-ticker-row">
+              <input type="text" id="wishlist-input" placeholder="Add ticker (e.g. NVDA)" maxlength="10"
+                     onkeydown="if(event.key==='Enter') addWishlistTicker()" />
+              <button class="gold-btn small" onclick="addWishlistTicker()">+ Add</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="wishlist-table">
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Added</th>
+                  <th>Notes</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="wishlist-body">
+                <tr><td colspan="4" class="empty-row">No tickers — add some above.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="ai-panel">
+          <div class="panel-header">
+            <h2>AI Analysis</h2>
+            <button class="gold-btn" id="analyse-wishlist-btn" onclick="analyseWishlist()">
+              ✦ Rank by Priority
+            </button>
+          </div>
+          <div class="ai-output" id="wishlist-ai-output">
+            <p class="placeholder-text">Add tickers to your watchlist, then click "Rank by Priority" to get Claude's analysis ranked by milestone growth potential.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NEXT MOVE -->
+    <div id="tab-nextmove" class="tab-pane">
+      <div class="nextmove-layout">
+        <div class="cash-info-card">
+          <div class="cash-row">
+            <span class="cash-label">Settled Cash Available</span>
+            <span class="cash-value" id="nm-settled-cash">—</span>
+          </div>
+          <div class="cash-row">
+            <span class="cash-label">Portfolio Value</span>
+            <span class="cash-value" id="nm-net-liq">—</span>
+          </div>
+          <button class="gold-btn wide" id="nextmove-btn" onclick="getNextMove()">
+            ✦ Get Claude's Recommendation
+          </button>
+        </div>
+        <div class="ai-output tall" id="nextmove-ai-output">
+          <p class="placeholder-text">Click the button to get Claude's specific buy suggestions with full working shown in plain English, based on your current settled cash and Weinstein Stage analysis.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- CHAT -->
+    <div id="tab-chat" class="tab-pane">
+      <div class="chat-layout">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-msg assistant">
+            <div class="chat-bubble">
+              Hi! I'm your Weinstein Trader AI. I have your live portfolio loaded as context and can search the web for current data. Ask me anything about your positions, market conditions, or trading strategy.
+            </div>
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <textarea id="chat-input" placeholder="Ask about your portfolio, a specific stock, or trading strategy…"
+                    rows="3" onkeydown="handleChatKey(event)"></textarea>
+          <button class="gold-btn" id="chat-send-btn" onclick="sendChat()">Send ↵</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+flask>=3.0.0
+flask-cors>=4.0.0
+anthropologic>=0.40.0
+ib_insync>=0.9.86
