@@ -6,8 +6,13 @@ Start TWS / IB Gateway first, then run:
 
 Open http://127.0.0.1:8050 in your browser.
 """
+import asyncio
 import logging
 import sys
+
+# Python 3.10+ no longer creates a default event loop automatically.
+# Set one up before ib_insync / eventkit import so they don't crash.
+asyncio.set_event_loop(asyncio.new_event_loop())
 
 logging.basicConfig(
     level=logging.INFO,
